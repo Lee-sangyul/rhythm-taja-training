@@ -19,7 +19,7 @@ progress{width:100%;accent-color:var(--mint);margin-top:16px}
 summary{cursor:pointer;font-weight:750}label{display:block;margin:14px 0 6px}input[type=file],audio{max-width:100%}audio{width:100%;margin:12px 0}
 </style>
 <main>
-<header><h1>리듬타자연습</h1><p>노래를 들으며 가사가 나오는 박자에 맞춰 쳐 봐.</p></header>
+<header><h1>리듬타자연습</h1><p>노래를 들으며 가사가 나오는 박자에 맞춰 입력하세요.</p></header>
 <section aria-label="타자 게임">
 <div class="row spread"><h2 id="song"></h2><button id="demo">데모 불러오기</button></div>
 <progress id="progress" value="0" max="1" aria-label="플레이 진행률"></progress>
@@ -30,11 +30,11 @@ summary{cursor:pointer;font-weight:750}label{display:block;margin:14px 0 6px}inp
 </section>
 <details>
 <summary>내 노래로 싱크 만들기</summary>
-<p>음원과 가사를 넣고 재생한 뒤, 음절이 들릴 때마다 <kbd>Space</kbd>를 누르거나 기록 버튼을 눌러. 가사의 띄어쓰기와 문장부호는 화면에만 표시돼.</p>
+<p>음원과 가사를 넣고 재생한 뒤, 음절이 들릴 때마다 <kbd>Space</kbd> 키 또는 ‘타이밍 기록’ 버튼을 누르세요. 띄어쓰기와 문장부호는 화면에만 표시됩니다.</p>
 <label for="file">음원 파일</label><input id="file" type="file" accept="audio/*">
 <label for="source">가사</label><textarea id="source" rows="4" placeholder="한 줄에 한 소절"></textarea>
 <audio id="editorAudio" controls preload="metadata"></audio>
-<div class="row"><button id="record">녹음 시작</button><button id="tap" disabled>타이밍 기록</button><button id="undo" disabled>한 음절 취소</button><button id="use" disabled>플레이에 적용</button></div>
+<div class="row"><button id="record">기록 시작</button><button id="tap" disabled>타이밍 기록</button><button id="undo" disabled>한 음절 취소</button><button id="use" disabled>플레이에 적용</button></div>
 <p id="editorStatus" role="status"></p>
 </details>
 </main>
@@ -90,7 +90,7 @@ function resetComposition() {
   $('entry').value = '';
 }
 
-function stop(message = '중지했어. 다시 시작하면 처음부터 재생돼.') {
+function stop(message = '재생을 중지했습니다. 다시 시작하면 처음부터 재생됩니다.') {
   session++;
   mode = null;
   cancelAnimationFrame(frame);
@@ -108,7 +108,7 @@ function stop(message = '중지했어. 다시 시작하면 처음부터 재생�
 }
 
 function select(song) {
-  stop('모드를 선택해서 시작해.');
+  stop('모드를 선택해 시작하세요.');
   chart = song;
   $('song').textContent = chart.name;
   cursor = score = combo = best = hits = 0;
@@ -162,7 +162,7 @@ async function start(next) {
   $('entry').disabled = false;
   $('entry').focus();
   if (next === 'practice') {
-    $('feedback').textContent = '초록색 글자부터 쳐 봐.';
+    $('feedback').textContent = '초록색 글자부터 입력하세요.';
     return;
   }
   try {
@@ -188,10 +188,10 @@ async function start(next) {
     }
     if (currentSession !== session) return;
     mode = 'sync';
-    $('feedback').textContent = '음절이 들리는 순간에 입력해.';
+    $('feedback').textContent = '음절이 들리는 순간에 입력하세요.';
     tick();
   } catch {
-    if (currentSession === session) stop('음원을 재생할 수 없어. 파일 형식과 재생 권한을 확인해.');
+    if (currentSession === session) stop('음원을 재생할 수 없습니다. 파일 형식과 재생 권한을 확인하세요.');
   }
 }
 
@@ -206,13 +206,13 @@ function judge(char) {
     return false;
   }
   if (char !== expected) {
-    if (mode === 'practice') $('feedback').textContent = '초록색 글자를 다시 확인해 봐.';
+    if (mode === 'practice') $('feedback').textContent = '초록색 글자를 다시 확인하세요.';
     draw();
     return false;
   }
   const delta = mode === 'sync' ? time - chart.times[cursor] : 0;
   if (delta < -hitWindow) {
-    $('feedback').textContent = '아직 일러! 박자에 다시 입력해.';
+    $('feedback').textContent = '입력이 너무 빠릅니다. 박자에 맞춰 다시 입력하세요.';
     draw();
     return false;
   }
@@ -222,7 +222,7 @@ function judge(char) {
   best = Math.max(combo, best);
   hits++;
   cursor++;
-  $('feedback').textContent = mode === 'practice' ? '정확해!' : perfect ? 'PERFECT' : delta < 0 ? 'EARLY' : 'LATE';
+  $('feedback').textContent = mode === 'practice' ? '정확합니다!' : perfect ? 'PERFECT' : delta < 0 ? 'EARLY' : 'LATE';
   draw();
   if (cursor === letters(chart.text).length) finish();
   return true;
@@ -257,7 +257,7 @@ $('entry').addEventListener('input', event => {
 function updateEditor(message) {
   const chars = letters($('source').value);
   const complete = chars.length > 0 && timings.length === chars.length;
-  $('editorStatus').textContent = message || (complete ? '기록 완료. 플레이에 적용할 수 있어.' :
+  $('editorStatus').textContent = message || (complete ? '기록을 완료했습니다. 이제 플레이에 적용할 수 있습니다.' :
     `${timings.length}/${chars.length} 기록 · 다음 음절 ${chars[timings.length] || '–'}`);
   $('tap').disabled = !recording || complete;
   $('undo').disabled = timings.length === 0;
@@ -294,7 +294,7 @@ $('source').addEventListener('input', () => {
 });
 $('record').addEventListener('click', async () => {
   if (recording || recordingStart) return cancelRecording();
-  if (!fileURL || !letters($('source').value).length) return updateEditor('음원 파일과 가사를 먼저 넣어 줘.');
+  if (!fileURL || !letters($('source').value).length) return updateEditor('음원 파일과 가사를 먼저 입력하세요.');
   stop('');
   const currentSession = ++editorSession;
   recordingStart = true;
@@ -311,7 +311,7 @@ $('record').addEventListener('click', async () => {
   } catch {
     if (currentSession !== editorSession) return;
     recordingStart = false;
-    updateEditor('이 음원 파일을 재생할 수 없어.');
+    updateEditor('이 음원 파일을 재생할 수 없습니다.');
   }
 });
 $('editorAudio').addEventListener('ended', cancelRecording);
@@ -319,7 +319,7 @@ $('editorAudio').addEventListener('play', () => { if (mode) stop(); });
 $('tap').addEventListener('click', () => {
   if (!recording || $('editorAudio').paused || $('tap').disabled) return;
   const time = $('editorAudio').currentTime;
-  if (timings.length && time <= timings.at(-1)) return updateEditor('다음 음절은 이전 기록보다 뒤에 찍어 줘.');
+  if (timings.length && time <= timings.at(-1)) return updateEditor('다음 음절의 타이밍은 이전 기록보다 뒤에 기록하세요.');
   timings.push(time);
   updateEditor();
 });
