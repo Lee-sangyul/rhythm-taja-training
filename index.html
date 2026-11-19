@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>리듬타자연습</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#141824;color:#edf1ff;--mint:#85edc9;--muted:#aab4cc}
+*{box-sizing:border-box}body{margin:0}main{max-width:850px;margin:auto;padding:54px 20px}
+h1{font-size:clamp(2.4rem,8vw,4rem);letter-spacing:-.09em;margin:0}h2{margin:0;font-size:1.1rem}
+p{line-height:1.65;color:var(--muted)}section,details{border:1px solid #374058;border-radius:22px;background:#202638;padding:clamp(16px,4vw,30px);margin-top:20px}
+.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.spread{justify-content:space-between}
+button,input,textarea{font:inherit}button{border:1px solid #47536d;border-radius:10px;background:#303950;color:inherit;padding:9px 14px;cursor:pointer}button:hover{border-color:var(--mint)}button:disabled{opacity:.45;cursor:default}.primary{background:var(--mint);color:#142820;border-color:transparent;font-weight:750}
+:focus-visible{outline:2px solid var(--mint);outline-offset:3px}
+progress{width:100%;accent-color:var(--mint);margin-top:16px}
+#lyrics{font-weight:750;line-height:1.6;font-size:clamp(1.65rem,5vw,2.8rem);min-height:4em;padding:18px 0;white-space:pre-wrap;overflow-wrap:anywhere;color:#c4cce0}
+.on-beat{background:#3f5770;border-radius:5px}.past{color:#8591ac}.current{color:var(--mint);border-bottom:3px solid currentColor}
+#entry,textarea{width:100%;padding:12px;border:1px solid #47536d;border-radius:10px;background:#141824;color:inherit}
+#feedback{min-height:1.7em;color:var(--mint);margin-bottom:0}#stats{color:var(--muted);font-variant-numeric:tabular-nums}
+summary{cursor:pointer;font-weight:750}label{display:block;margin:14px 0 6px}input[type=file],audio{max-width:100%}audio{width:100%;margin:12px 0}
+</style>
+<main>
+<header><h1>리듬타자연습</h1><p>노래를 들으며 가사가 나오는 박자에 맞춰 쳐 봐.</p></header>
+<section aria-label="타자 게임">
+<div class="row spread"><h2 id="song"></h2><button id="demo">데모 불러오기</button></div>
+<progress id="progress" value="0" max="1" aria-label="플레이 진행률"></progress>
+<div id="lyrics"></div>
+<label for="entry">가사 입력</label><input id="entry" autocomplete="off" autocapitalize="off" spellcheck="false" disabled>
+<p id="feedback" role="status"></p>
+<div class="row spread"><div class="row"><button class="primary" id="sync">싱크 시작</button><button id="practice">자유 연습</button><button id="stop" disabled>중지</button></div><span id="stats"></span></div>
+</section>
+<details>
+<summary>내 노래로 싱크 만들기</summary>
+<p>음원과 가사를 넣고 재생한 뒤, 음절이 들릴 때마다 <kbd>Space</kbd>를 누르거나 기록 버튼을 눌러. 가사의 띄어쓰기와 문장부호는 화면에만 표시돼.</p>
+<label for="file">음원 파일</label><input id="file" type="file" accept="audio/*">
+<label for="source">가사</label><textarea id="source" rows="4" placeholder="한 줄에 한 소절"></textarea>
+<audio id="editorAudio" controls preload="metadata"></audio>
+<div class="row"><button id="record">녹음 시작</button><button id="tap" disabled>타이밍 기록</button><button id="undo" disabled>한 음절 취소</button><button id="use" disabled>플레이에 적용</button></div>
+<p id="editorStatus" role="status"></p>
+</details>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const demoText = '한 걸음씩\n박자를 타\n오늘도 난\n리듬을 타';
+const demoTimes = Array.from({length: 16}, (_, i) => 1 + i * 0.55 + Math.floor(i / 4) * 0.4);
+const hitWindow = 0.40;
+const perfectWindow = 0.15;
+const letters = text => Array.from(text.normalize('NFC')).filter(char => /[\p{L}\p{N}]/u.test(char));
+const demo = {name: '첫 박자 · 데모', text: demoText, times: demoTimes};
+let chart = demo;
+let mode, audio, context, origin, frame, cursor, score, combo, best, hits;
+let session = 0;
+let renderedCursor;
+let beatIndex = 0;
+let submittedComposition = false;
+let recording = false;
+let recordingStart = false;
+let editorSession = 0;
+let timings = [];
+let fileURL;
+
+function draw() {
+  const index = cursor;
+  renderedCursor = cursor;
+  const lines = chart.text.normalize('NFC').split('\n').filter(line => letters(line).length);
+  let position = 0;
+  const line = lines.find((value, lineIndex) => {
+    const end = position + letters(value).length;
+    if (index < end || lineIndex === lines.length - 1) return true;
+    position = end;
+    return false;
+  });
+  $('lyrics').replaceChildren(...Array.from(line || '', char => {
+    const span = document.createElement('span');
+    span.textContent = char;
+    if (letters(char).length) {
+      span.dataset.index = position;
+      if (position < index) span.className = 'past';
+      if (position === index) span.className = 'current';
+      position++;
+    }
+    return span;
+  }));
+  $('progress').max = letters(chart.text).length;
+  $('progress').value = cursor;
+  $('stats').textContent = `${score}점 · ${combo} 콤보`;
+}
+
+function resetComposition() {
+  submittedComposition = false;
+  $('entry').value = '';
+}
+
+function stop(message = '중지했어. 다시 시작하면 처음부터 재생돼.') {
+  session++;
+  mode = null;
+  cancelAnimationFrame(frame);
+  audio?.pause();
+  audio = null;
+  if (context) {
+    void context.close();
+    context = null;
+  }
+  $('entry').disabled = true;
+  $('stop').disabled = true;
+  resetComposition();
+  $('lyrics').querySelector('.on-beat')?.classList.remove('on-beat');
+  $('feedback').textContent = message;
+}
+
+function select(song) {
+  stop('모드를 선택해서 시작해.');
+  chart = song;
+  $('song').textContent = chart.name;
+  cursor = score = combo = best = hits = 0;
+  draw();
+}
+
+function finish() {
+  stop(`완료! ${score}점 · ${hits}/${letters(chart.text).length} 음절 성공 · 최고 ${best} 콤보`);
+}
+
+const now = () => audio ? audio.currentTime : context.currentTime - origin;
+
+function expire(time) {
+  while (cursor < chart.times.length && time > chart.times[cursor] + hitWindow) {
+    cursor++;
+    combo = 0;
+    $('feedback').textContent = 'MISS';
+  }
+}
+
+function tick() {
+  if (mode !== 'sync') return;
+  const time = now();
+  expire(time);
+  if (audio?.ended) {
+    cursor = chart.times.length;
+    combo = 0;
+  }
+  if (renderedCursor !== cursor) draw();
+  while (beatIndex + 1 < chart.times.length && chart.times[beatIndex + 1] <= time) beatIndex++;
+  const onBeat = time >= chart.times[beatIndex] && time < chart.times[beatIndex] + 0.20;
+  const currentBeat = $('lyrics').querySelector('.on-beat');
+  const nextBeat = onBeat ? $('lyrics').querySelector(`[data-index="${beatIndex}"]`) : null;
+  if (currentBeat !== nextBeat) {
+    currentBeat?.classList.remove('on-beat');
+    nextBeat?.classList.add('on-beat');
+  }
+  if (cursor === chart.times.length) finish();
+  else frame = requestAnimationFrame(tick);
+}
+
+async function start(next) {
+  stop('');
+  cancelRecording();
+  const currentSession = session;
+  beatIndex = 0;
+  cursor = score = combo = best = hits = 0;
+  draw();
+  mode = next === 'sync' ? 'loading' : next;
+  $('stop').disabled = false;
+  $('entry').disabled = false;
+  $('entry').focus();
+  if (next === 'practice') {
+    $('feedback').textContent = '초록색 글자부터 쳐 봐.';
+    return;
+  }
+  try {
+    if (chart.url) {
+      audio = new Audio(chart.url);
+      await audio.play();
+    } else {
+      context = new AudioContext();
+      await context.resume();
+      if (currentSession !== session) return;
+      origin = context.currentTime + 0.1;
+      for (let i = 0; i < chart.times.length; i++) {
+        const tone = context.createOscillator();
+        const volume = context.createGain();
+        const at = origin + chart.times[i];
+        tone.frequency.value = [392, 440, 494, 523, 440, 392, 349, 330][i % 8];
+        volume.gain.setValueAtTime(0.19, at);
+        volume.gain.exponentialRampToValueAtTime(0.001, at + 0.24);
+        tone.connect(volume).connect(context.destination);
+        tone.start(at);
+        tone.stop(at + 0.25);
+      }
+    }
+    if (currentSession !== session) return;
+    mode = 'sync';
+    $('feedback').textContent = '음절이 들리는 순간에 입력해.';
+    tick();
+  } catch {
+    if (currentSession === session) stop('음원을 재생할 수 없어. 파일 형식과 재생 권한을 확인해.');
+  }
+}
+
+function judge(char) {
+  if (mode !== 'sync' && mode !== 'practice') return false;
+  const time = mode === 'sync' ? now() : 0;
+  if (mode === 'sync') expire(time);
+  const expected = letters(chart.text)[cursor];
+  if (!expected) {
+    draw();
+    finish();
+    return false;
+  }
+  if (char !== expected) {
+    if (mode === 'practice') $('feedback').textContent = '초록색 글자를 다시 확인해 봐.';
+    draw();
+    return false;
+  }
+  const delta = mode === 'sync' ? time - chart.times[cursor] : 0;
+  if (delta < -hitWindow) {
+    $('feedback').textContent = '아직 일러! 박자에 다시 입력해.';
+    draw();
+    return false;
+  }
+  const perfect = Math.abs(delta) <= perfectWindow;
+  score += perfect ? 100 : 60;
+  combo++;
+  best = Math.max(combo, best);
+  hits++;
+  cursor++;
+  $('feedback').textContent = mode === 'practice' ? '정확해!' : perfect ? 'PERFECT' : delta < 0 ? 'EARLY' : 'LATE';
+  draw();
+  if (cursor === letters(chart.text).length) finish();
+  return true;
+}
+
+$('entry').addEventListener('compositionstart', () => {
+  submittedComposition = false;
+});
+$('entry').addEventListener('compositionupdate', event => {
+  const composition = event.data.normalize('NFC');
+  // Judge during composition so the last syllable does not need another key.
+  if (!submittedComposition && letters(composition).length === 1) {
+    submittedComposition = judge(composition);
+  }
+});
+$('entry').addEventListener('compositionend', event => {
+  if (!submittedComposition && letters(event.data).length === 1) judge(event.data.normalize('NFC'));
+  submittedComposition = false;
+  $('entry').value = '';
+});
+$('entry').addEventListener('beforeinput', event => {
+  if (event.inputType === 'insertFromPaste' || event.inputType === 'insertFromDrop') event.preventDefault();
+});
+$('entry').addEventListener('input', event => {
+  if (event.isComposing || event.inputType === 'insertFromComposition') return;
+  if (event.inputType === 'insertText' && letters(event.data || '').length === 1) {
+    judge(event.data.normalize('NFC'));
+  }
+  $('entry').value = '';
+});
+
+function updateEditor(message) {
+  const chars = letters($('source').value);
+  const complete = chars.length > 0 && timings.length === chars.length;
+  $('editorStatus').textContent = message || (complete ? '기록 완료. 플레이에 적용할 수 있어.' :
+    `${timings.length}/${chars.length} 기록 · 다음 음절 ${chars[timings.length] || '–'}`);
+  $('tap').disabled = !recording || complete;
+  $('undo').disabled = timings.length === 0;
+  $('use').disabled = !complete || recordingStart;
+  $('record').textContent = recording || recordingStart ? '기록 중지' : '기록 시작';
+}
+
+function cancelRecording() {
+  editorSession++;
+  recording = false;
+  recordingStart = false;
+  $('editorAudio').pause();
+  updateEditor();
+}
+
+$('file').addEventListener('change', () => {
+  cancelRecording();
+  const file = $('file').files[0];
+  if (chart.url === fileURL && chart.url) select(demo);
+  if (fileURL) URL.revokeObjectURL(fileURL);
+  fileURL = file ? URL.createObjectURL(file) : undefined;
+  if (fileURL) $('editorAudio').src = fileURL;
+  else {
+    $('editorAudio').removeAttribute('src');
+    $('editorAudio').load();
+  }
+  timings = [];
+  updateEditor();
+});
+$('source').addEventListener('input', () => {
+  cancelRecording();
+  timings = [];
+  updateEditor();
+});
+$('record').addEventListener('click', async () => {
+  if (recording || recordingStart) return cancelRecording();
+  if (!fileURL || !letters($('source').value).length) return updateEditor('음원 파일과 가사를 먼저 넣어 줘.');
+  stop('');
+  const currentSession = ++editorSession;
+  recordingStart = true;
+  const player = $('editorAudio');
+  if (!timings.length) player.currentTime = 0;
+  updateEditor('재생 준비 중…');
+  try {
+    await player.play();
+    if (currentSession !== editorSession) return;
+    recordingStart = false;
+    recording = true;
+    updateEditor();
+    $('tap').focus();
+  } catch {
+    if (currentSession !== editorSession) return;
+    recordingStart = false;
+    updateEditor('이 음원 파일을 재생할 수 없어.');
+  }
+});
+$('editorAudio').addEventListener('ended', cancelRecording);
+$('editorAudio').addEventListener('play', () => { if (mode) stop(); });
+$('tap').addEventListener('click', () => {
+  if (!recording || $('editorAudio').paused || $('tap').disabled) return;
+  const time = $('editorAudio').currentTime;
+  if (timings.length && time <= timings.at(-1)) return updateEditor('다음 음절은 이전 기록보다 뒤에 찍어 줘.');
+  timings.push(time);
+  updateEditor();
+});
+document.addEventListener('keydown', event => {
+  if (!recording || event.code !== 'Space' || event.repeat ||
+      event.target.matches('input, textarea, audio, button:not(#tap)')) return;
+  event.preventDefault();
+  $('tap').click();
+});
+$('undo').addEventListener('click', () => {
+  const time = timings.pop();
+  if (time !== undefined) $('editorAudio').currentTime = Math.max(0, time - 1);
+  updateEditor();
+});
+$('use').addEventListener('click', () => {
+  cancelRecording();
+  select({name: $('file').files[0].name, text: $('source').value, times: [...timings], url: fileURL});
+  document.querySelector('details').open = false;
+  $('sync').focus();
+});
+$('demo').addEventListener('click', () => { cancelRecording(); select(demo); });
+$('sync').addEventListener('click', () => start('sync'));
+$('practice').addEventListener('click', () => start('practice'));
+$('stop').addEventListener('click', () => stop());
+select(demo);
+updateEditor();
+</script>
+</html>
